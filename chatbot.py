@@ -15,6 +15,10 @@ from langchain_groq import ChatGroq
 load_dotenv(find_dotenv())
 HF_TOKEN = os.environ.get("HF_TOKEN")
 HUGGINGFACE_REPO_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+DB_FAISS_PATH = "vectorstore/db_faiss"
+EMBED_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
+
+
 
 
 def load_llm(huggingface_repo_id):
@@ -71,3 +75,19 @@ uploaded_files = st.file_uploader("Upload one or more PDF files", accept_multipl
 qa_chain = None  # initialize chain
 
 
+
+
+if uploaded_files:
+    chunks = extract_and_chunk_multiple_pdfs(uploaded_files)
+    new_db = FAISS.from_texts(chunks, embedding_model)
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=ChatGroq(
+            model_name="meta-llama/llama-4-maverick-17b-128e-instruct",
+            temperature=0.0,
+            groq_api_key=os.environ["GROQ_API_KEY"],
+        ),
+        chain_type="stuff",
+        retriever=new_db.as_retriever(search_kwargs={'k': 3}),
+        return_source_documents=True,
+        chain_type_kwargs={'prompt': set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
+    )
