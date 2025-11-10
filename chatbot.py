@@ -2,6 +2,13 @@ import os
 from langchain_huggingface import HuggingFaceEndpoint
 from dotenv import load_dotenv, find_dotenv
 from langchain_core.prompts import PromptTemplate
+from PyPDF2 import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+import streamlit as st
+from langchain.chains import RetrievalQA
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain_groq import ChatGroq
 
 
 
@@ -31,5 +38,36 @@ Start the answer directly. No small talk please.
 def set_custom_prompt(custom_prompt_template):
     prompt = PromptTemplate(template=custom_prompt_template, input_variables=["context", "question"])
     return prompt
+
+
+# Extract text from multiple PDFs and chunk all together
+def extract_and_chunk_multiple_pdfs(pdf_files, chunk_size=1000, chunk_overlap=200):
+    combined_text = ""
+    for pdf_file in pdf_files:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                combined_text += text + "\n"
+    splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    chunks = splitter.split_text(combined_text)
+    return chunks
+
+embedding_model = HuggingFaceEmbeddings(model_name=EMBED_MODEL_NAME)
+if os.path.exists(DB_FAISS_PATH):
+    db = FAISS.load_local(DB_FAISS_PATH, embedding_model, allow_dangerous_deserialization=True)
+else:
+    db = None
+
+st.set_page_config(page_title="PDF Chatbot", layout="wide")
+st.title("PDF Chatbot")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Multiple PDFs uploader
+uploaded_files = st.file_uploader("Upload one or more PDF files", accept_multiple_files=True, type="pdf")
+
+qa_chain = None  # initialize chain
 
 
