@@ -10,17 +10,83 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 
-
-
+# -------------------- SETUP --------------------
 load_dotenv(find_dotenv())
 HF_TOKEN = os.environ.get("HF_TOKEN")
 HUGGINGFACE_REPO_ID = "mistralai/Mistral-7B-Instruct-v0.3"
 DB_FAISS_PATH = "vectorstore/db_faiss"
 EMBED_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 
+# -------------------- STYLING --------------------
+st.set_page_config(page_title="📚 RAG PDF Chatbot", layout="wide")
 
+st.markdown("""
+    <style>
+        /* General App Background */
+        .stApp {
+            background: linear-gradient(180deg, #f8f9fc 0%, #eef1f7 100%);
+            font-family: 'Segoe UI', sans-serif;
+        }
+        /* Title */
+        .title {
+            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: #2C3E50;
+            margin-bottom: 1rem;
+        }
+        /* Subtitle */
+        .subtitle {
+            text-align: center;
+            color: #7F8C8D;
+            font-size: 1rem;
+            margin-bottom: 2rem;
+        }
+        /* Upload Box */
+        .upload-box {
+            border: 2px dashed #4A90E2;
+            border-radius: 10px;
+            padding: 1.5rem;
+            background-color: #fefefe;
+        }
+        /* Chat messages */
+        .user-msg {
+            background-color: #d9eaff;
+            padding: 0.8rem;
+            border-radius: 10px;
+            margin-bottom: 0.5rem;
+            color: #1B4F72;
+        }
+        .bot-msg {
+            background-color: #f4f6f7;
+            padding: 0.8rem;
+            border-radius: 10px;
+            margin-bottom: 0.5rem;
+            color: #2C3E50;
+        }
+        /* Input box */
+        .stChatInput input {
+            border-radius: 10px;
+            padding: 0.6rem;
+            border: 1px solid #ccc;
+        }
+        /* Button */
+        div.stButton > button:first-child {
+            background-color: #4A90E2;
+            color: white;
+            border-radius: 10px;
+            height: 2.5em;
+            width: 100%;
+            font-weight: 600;
+        }
+        div.stButton > button:hover {
+            background-color: #3b7fd4;
+            color: white;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-
+# -------------------- BACKEND FUNCTIONS (UNCHANGED) --------------------
 def load_llm(huggingface_repo_id):
     llm = HuggingFaceEndpoint(
         repo_id=huggingface_repo_id,
@@ -43,8 +109,6 @@ def set_custom_prompt(custom_prompt_template):
     prompt = PromptTemplate(template=custom_prompt_template, input_variables=["context", "question"])
     return prompt
 
-
-# Extract text from multiple PDFs and chunk all together
 def extract_and_chunk_multiple_pdfs(pdf_files, chunk_size=1000, chunk_overlap=200):
     combined_text = ""
     for pdf_file in pdf_files:
@@ -63,20 +127,22 @@ if os.path.exists(DB_FAISS_PATH):
 else:
     db = None
 
-st.set_page_config(page_title="PDF Chatbot", layout="wide")
-st.title("PDF Chatbot")
+# -------------------- UI HEADER --------------------
+st.markdown('<div class="title">📄 PDF Chatbot with RAG</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Upload PDFs and ask context-aware questions powered by LLMs</div>', unsafe_allow_html=True)
+
+# -------------------- UPLOAD SECTION --------------------
+with st.container():
+    st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+    uploaded_files = st.file_uploader("📤 Upload one or more PDF files", accept_multiple_files=True, type="pdf")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Multiple PDFs uploader
-uploaded_files = st.file_uploader("Upload one or more PDF files", accept_multiple_files=True, type="pdf")
+qa_chain = None
 
-qa_chain = None  # initialize chain
-
-
-
-
+# -------------------- CREATE VECTORSTORE --------------------
 if uploaded_files:
     chunks = extract_and_chunk_multiple_pdfs(uploaded_files)
     new_db = FAISS.from_texts(chunks, embedding_model)
@@ -91,3 +157,31 @@ if uploaded_files:
         return_source_documents=True,
         chain_type_kwargs={'prompt': set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
     )
+
+# -------------------- CLEAR BUTTON --------------------
+st.markdown("### 🧹 Manage Chat")
+if st.button("Clear History"):
+    st.session_state.messages = []
+    st.toast("Chat history cleared!", icon="🧼")
+
+# -------------------- CHAT DISPLAY --------------------
+st.markdown("### 💬 Chat History")
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        st.markdown(f'<div class="user-msg">👤 <b>You:</b> {msg["content"]}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown(f'<div class="bot-msg">🤖 <b>Bot:</b> {msg["content"]}</div>', unsafe_allow_html=True)
+
+# -------------------- CHAT INPUT --------------------
+prompt = st.chat_input("💭 Ask something about the PDF(s)...")
+if prompt and qa_chain:
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.markdown(f'<div class="user-msg">👤 <b>You:</b> {prompt}</div>', unsafe_allow_html=True)
+
+    with st.spinner("🤔 Thinking..."):
+        response = qa_chain.invoke({'query': prompt})
+        bot_reply = response["result"].strip() or "The information is not found in the PDF(s) you gave."
+        st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+        st.markdown(f'<div class="bot-msg">🤖 <b>Bot:</b> {bot_reply}</div>', unsafe_allow_html=True)
+elif prompt and not qa_chain:
+    st.warning("⚠️ Please upload PDF(s) first before asking questions.")
