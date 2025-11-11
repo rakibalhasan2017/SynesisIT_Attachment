@@ -91,3 +91,24 @@ if uploaded_files:
         return_source_documents=True,
         chain_type_kwargs={'prompt': set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
     )
+
+
+# Clear chat history button
+if st.button("Clear History", type="primary"):
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+prompt = st.chat_input("Ask a question about the PDF(s):")
+if prompt:
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    with st.spinner("Thinking..."):
+        response = qa_chain.invoke({'query': prompt})
+        bot_reply = response["result"].strip() or "The information is not found in the PDF(s) you gave."
+        st.session_state.messages.append({"role": "assistant", "content": bot_reply})
+        with st.chat_message("assistant"):
+            st.markdown(bot_reply)
