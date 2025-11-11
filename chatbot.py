@@ -5,29 +5,29 @@ from langchain_core.prompts import PromptTemplate
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import streamlit as st
-from langchain.chains import RetrievalQA
+from langchain.chains import RetrievalQA, LLMChain
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_community.tools import DuckDuckGoSearchRun
+from langchain.agents import initialize_agent, AgentType
 from langchain_groq import ChatGroq
 
 # -------------------- SETUP --------------------
 load_dotenv(find_dotenv())
 HF_TOKEN = os.environ.get("HF_TOKEN")
-HUGGINGFACE_REPO_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+HUGGINGFACE_REPO_ID = "Qwen/Qwen3-4B-Instruct-2507"
 DB_FAISS_PATH = "vectorstore/db_faiss"
 EMBED_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
 
 # -------------------- STYLING --------------------
-st.set_page_config(page_title="📚 RAG PDF Chatbot", layout="wide")
+st.set_page_config(page_title="📚 RAG + Web Agent Chatbot", layout="wide")
 
 st.markdown("""
     <style>
-        /* General App Background */
         .stApp {
             background: #f4ecd8;
             font-family: 'Segoe UI', sans-serif;
         }
-        /* Title */
         .title {
             text-align: center;
             font-size: 2.2rem;
@@ -35,21 +35,18 @@ st.markdown("""
             color: #2C3E50;
             margin-bottom: 1rem;
         }
-        /* Subtitle */
         .subtitle {
             text-align: center;
             color: #7F8C8D;
             font-size: 1rem;
             margin-bottom: 2rem;
         }
-        /* Upload Box */
         .upload-box {
             border: 2px dashed #4A90E2;
             border-radius: 10px;
             padding: 1.5rem;
             background-color: #fefefe;
         }
-        /* Chat messages */
         .user-msg {
             background-color: #d9eaff;
             padding: 0.8rem;
@@ -64,13 +61,6 @@ st.markdown("""
             margin-bottom: 0.5rem;
             color: #2C3E50;
         }
-        /* Input box */
-        .stChatInput input {
-            border-radius: 10px;
-            padding: 0.6rem;
-            border: 1px solid #ccc;
-        }
-        /* Button */
         div.stButton > button:first-child {
             background-color: #4A90E2;
             color: white;
@@ -86,18 +76,21 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# -------------------- BACKEND FUNCTIONS (UNCHANGED) --------------------
-def load_llm(huggingface_repo_id):
-    llm = HuggingFaceEndpoint(
-        repo_id=huggingface_repo_id,
-        temperature=0.5,
-        model_kwargs={"token": HF_TOKEN, "max_length": "512"}
-    )
-    return llm
+# -------------------- BACKEND FUNCTIONS --------------------
 
+def load_llm(huggingface_repo_id):
+     llm = HuggingFaceEndpoint(
+          repo_id=huggingface_repo_id,
+            task="conversational",
+            temperature=0.5,
+             max_new_tokens=1000
+     )
+     return llm
+     
 CUSTOM_PROMPT_TEMPLATE = """
-Use the information that has already been shared in the context to answer the user's question. If you're unsure of the answer, simply say that the information is not available in the PDF/PDFs instead of trying to create an answer.
-Don't give any information that's not in the context provided.
+Use the information that has already been shared in the context to answer the user's question. 
+If you're unsure of the answer, simply say that the information is not available in the PDF/PDFs 
+instead of trying to create an answer.
 
 Context: {context}
 Question: {question}
@@ -128,8 +121,8 @@ else:
     db = None
 
 # -------------------- UI HEADER --------------------
-st.markdown('<div class="title">📄 RAG Based ChatBot</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Upload PDFs and ask context-aware questions powered by LLMs</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">🤖 RAG + Web Agent ChatBot</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Ask from uploaded PDFs or get answers from the web</div>', unsafe_allow_html=True)
 
 # -------------------- UPLOAD SECTION --------------------
 with st.container():
@@ -158,6 +151,22 @@ if uploaded_files:
         chain_type_kwargs={'prompt': set_custom_prompt(CUSTOM_PROMPT_TEMPLATE)}
     )
 
+# -------------------- WEB SEARCH AGENT --------------------
+search_tool = DuckDuckGoSearchRun()
+
+agent_llm = ChatGroq(
+    model_name="meta-llama/llama-4-maverick-17b-128e-instruct",
+    temperature=0.0,
+    groq_api_key=os.environ["GROQ_API_KEY"],
+)
+
+agent = initialize_agent(
+    tools=[search_tool],
+    llm=agent_llm,
+    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    verbose=True
+)
+
 # -------------------- CLEAR BUTTON --------------------
 st.markdown("### 🧹 Manage Chat")
 if st.button("Clear History"):
@@ -173,15 +182,20 @@ for msg in st.session_state.messages:
         st.markdown(f'<div class="bot-msg">🤖 <b>Bot:</b> {msg["content"]}</div>', unsafe_allow_html=True)
 
 # -------------------- CHAT INPUT --------------------
-prompt = st.chat_input("💭 Ask something about the PDF(s)...")
-if prompt and qa_chain:
+prompt = st.chat_input("💭 Ask something (PDF-based or general web question)...")
+
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.markdown(f'<div class="user-msg">👤 <b>You:</b> {prompt}</div>', unsafe_allow_html=True)
 
     with st.spinner("🤔 Thinking..."):
-        response = qa_chain.invoke({'query': prompt})
-        bot_reply = response["result"].strip() or "The information is not found in the PDF(s) you gave."
+        # Case 1: PDFs are uploaded → Use RAG
+        if qa_chain:
+            response = qa_chain.invoke({'query': prompt})
+            bot_reply = response["result"].strip() or "The information is not found in the PDF(s) you gave."
+        # Case 2: No PDFs → Use DuckDuckGo Agent
+        else:
+            bot_reply = agent.run(prompt)
+        
         st.session_state.messages.append({"role": "assistant", "content": bot_reply})
         st.markdown(f'<div class="bot-msg">🤖 <b>Bot:</b> {bot_reply}</div>', unsafe_allow_html=True)
-elif prompt and not qa_chain:
-    st.warning("⚠️ Please upload PDF(s) first before asking questions.")
