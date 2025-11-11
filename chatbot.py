@@ -24,7 +24,7 @@ st.markdown("""
     <style>
         /* General App Background */
         .stApp {
-            background: linear-gradient(180deg, #f8f9fc 0%, #eef1f7 100%);
+            background: #f4ecd8;
             font-family: 'Segoe UI', sans-serif;
         }
         /* Title */
@@ -128,7 +128,7 @@ else:
     db = None
 
 # -------------------- UI HEADER --------------------
-st.markdown('<div class="title">📄 PDF Chatbot with RAG</div>', unsafe_allow_html=True)
+st.markdown('<div class="title">📄 RAG Based ChatBot</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle">Upload PDFs and ask context-aware questions powered by LLMs</div>', unsafe_allow_html=True)
 
 # -------------------- UPLOAD SECTION --------------------
